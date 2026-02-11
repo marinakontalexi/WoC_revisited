@@ -19,9 +19,8 @@ conditions_idx = {key: i for i, key in conditions.items()}
 palette = {'Consensus': 'hotpink', 'Control': 'gray', 'Most recent': 'orange', 'Most confident': 'olivedrab', 'Simulation' : 'royalblue'}
 
 # load experiment data
-df = pd.read_pickle('../experiment_data/crowd_full.pkl')
-
-tasks = pd.read_csv('../experiment_data/original/tasks.csv.zip')  # Ensure the correct path
+df = pd.read_pickle('../experiment_data/crowd_full.pkl')    # Ensure the correct path
+tasks = pd.read_csv('../experiment_data/original/tasks.csv.zip')  
 domains = pd.read_csv('../experiment_data/original/domains.csv.zip')
 
 # simple get functions to retrieve data for a given task_id and condition
@@ -49,7 +48,7 @@ def domain_func(domain, func, **kwargs):
     return results
 
 # build a dictionary with precomputed info for each task and condition
-def build_task_params_df(df=df, c_tolerance=0, cutoff=5, normalization="perc"):
+def build_task_params_df(df=df, c_tolerance=0):
     """
     Precompute and store parameters for all tasks into a DataFrame.
     This avoids repeated calls to get_params() and normalization functions.
@@ -207,6 +206,7 @@ def build_task_params(load=True):
     save_to_json(task_params_df.to_dict(orient='index'), "data/task_params")
     return task_params_df
 
+# build the task_params_df and dict at module load time for fast access in plotting and analysis functions
 c_tolerance = 0
 task_params_df = build_task_params(load=True)
 task_params_dict = task_params_df.to_dict(orient='index')
@@ -218,7 +218,7 @@ def get_params(task_id, task_params_df=task_params_df):
         raise ValueError(f"Task {task_id} not found in precomputed DataFrame.")
     return r.to_dict()
 
-def compute_avg_c_per_domain(tolerance=0):
+def compute_avg_c_per_domain():
     mu_c_dict = {}
     ranges = {}
     for domain in df['domain_name'].unique():
@@ -237,15 +237,27 @@ def compute_avg_c_per_domain(tolerance=0):
     return mu_c_dict, ranges
 
 
-c_per_domain, _ = compute_avg_c_per_domain(tolerance=c_tolerance)
+# compute average copying probability per domain and order domains by it for consistent coloring and labeling in plots
+c_per_domain, _ = compute_avg_c_per_domain()
 domains_ordered_by_c = sorted(c_per_domain.keys(), key=lambda x: c_per_domain[x])
 ordered_domains = {dom: i+1 for i, dom in enumerate(domains_ordered_by_c)}
 
-# plotting functions
 
+# ---- PLOTTING FUNCTIONS ----
 def plot_answers_over_time(task_id, conds=conditions.keys(), df=df,
                            ans=True, avg=True, median=True,
                            ax=None):
+    """
+    Function to plot the evolution of answers over time for a given task and conditions.
+    
+    :param task_id: id of the task to plot
+    :param conds: list of condition indices to include in the plot (default: [0,1,2,3] -> all conditions)
+    :param df: DataFrame containing the data to plot (default: global df)
+    :param ans: Whether to plot individual answers (default: True)
+    :param avg: Whether to plot the average answer over time (default: True)
+    :param median: Whether to plot the median answer over time (default: True)
+    :param ax: Matplotlib axis to plot on (optional)
+    """
 
     task_data = df[(df['task_id'] == task_id) & (df["experimental_condition"].isin([conditions[i] for i in conds]))].copy()
 
@@ -280,92 +292,97 @@ def plot_answers_over_time(task_id, conds=conditions.keys(), df=df,
     ax.grid(True)
     # plt.show()
 
-def plot_domain_bar_groups(dict_groups, labels_groups, colors_groups=None, scales=None,
-                           title="", path=None, ranges_groups=None, sorting=True):
-    """
-    Plots grouped bar charts for dictionaries over domains.
+# def plot_domain_bar_groups(dict_groups, labels_groups, colors_groups=None, scales=None,
+#                            title="", path=None, ranges_groups=None, sorting=True):
+#     """
+#     Plots grouped bar charts for dictionaries over domains.
     
-    Parameters:
-    - dict_groups: List of lists of dictionaries. Each sublist is a group sharing a y-axis.
-    - labels_groups: List of lists of labels corresponding to the dictionaries.
-    - colors_groups: List of lists of colors (optional).
-    - title: Plot title.
-    """
-    assert len(dict_groups) == len(labels_groups), "Groups and labels must match"
+#     Parameters:
+#     - dict_groups: List of lists of dictionaries. Each sublist is a group sharing a y-axis.
+#     - labels_groups: List of lists of labels corresponding to the dictionaries.
+#     - colors_groups: List of lists of colors (optional).
+#     - title: Plot title.
+#     """
+#     assert len(dict_groups) == len(labels_groups), "Groups and labels must match"
 
-    if sorting:
-        all_domains = sorted(set().union(*[d.keys() for group in dict_groups for d in group]))
-    else:
-        all_domains = list(set().union(*[d.keys() for group in dict_groups for d in group]))
+#     if sorting:
+#         all_domains = sorted(set().union(*[d.keys() for group in dict_groups for d in group]))
+#     else:
+#         all_domains = list(set().union(*[d.keys() for group in dict_groups for d in group]))
 
-    x = np.arange(len(all_domains))
-    total_width = 0.8
-    num_total_bars = sum(len(group) for group in dict_groups)
-    bar_width = total_width / num_total_bars
+#     x = np.arange(len(all_domains))
+#     total_width = 0.8
+#     num_total_bars = sum(len(group) for group in dict_groups)
+#     bar_width = total_width / num_total_bars
 
-    fig, ax1 = plt.subplots(figsize=(14, 6))
-    ax = ax1
-    ax_list = [ax]
+#     fig, ax1 = plt.subplots(figsize=(14, 6))
+#     ax = ax1
+#     ax_list = [ax]
 
-    bar_pos = -total_width / 2
-    legend_handles = []  # To store handles separately for each group
-    legend_labels = []   # To store labels separately for each group
+#     bar_pos = -total_width / 2
+#     legend_handles = []  # To store handles separately for each group
+#     legend_labels = []   # To store labels separately for each group
 
-    for group_idx, (dicts, labels) in enumerate(zip(dict_groups, labels_groups)):
-        # Use second y-axis if needed
-        if group_idx > 0:
-            ax = ax1.twinx()
-            ax_list.append(ax)
-            ax.spines['right'].set_position(('axes', 1 + 0.1 * (group_idx - 1)))
-            ax.set_frame_on(True)
+#     for group_idx, (dicts, labels) in enumerate(zip(dict_groups, labels_groups)):
+#         # Use second y-axis if needed
+#         if group_idx > 0:
+#             ax = ax1.twinx()
+#             ax_list.append(ax)
+#             ax.spines['right'].set_position(('axes', 1 + 0.1 * (group_idx - 1)))
+#             ax.set_frame_on(True)
 
-        group_handles = []  # To store handles for the current group
-        group_labels = []   # To store labels for the current group
+#         group_handles = []  # To store handles for the current group
+#         group_labels = []   # To store labels for the current group
 
-        for i, (d, label) in enumerate(zip(dicts, labels)):
-            values = [d.get(domain, 0) for domain in all_domains]
-            positions = x + bar_pos + i * bar_width
-            color = colors_groups[group_idx][i] if colors_groups and group_idx < len(colors_groups) and i < len(colors_groups[group_idx]) else None
-            bar = ax.bar(positions, values, bar_width, label=label, alpha=0.8, color=color)
+#         for i, (d, label) in enumerate(zip(dicts, labels)):
+#             values = [d.get(domain, 0) for domain in all_domains]
+#             positions = x + bar_pos + i * bar_width
+#             color = colors_groups[group_idx][i] if colors_groups and group_idx < len(colors_groups) and i < len(colors_groups[group_idx]) else None
+#             bar = ax.bar(positions, values, bar_width, label=label, alpha=0.8, color=color)
 
-            yerr_low = [ranges_groups[group_idx][i][domain][0] for domain in all_domains] if ranges_groups[group_idx] else None
-            yerr_high = [ranges_groups[group_idx][i][domain][1] for domain in all_domains] if ranges_groups[group_idx] else None
+#             yerr_low = [ranges_groups[group_idx][i][domain][0] for domain in all_domains] if ranges_groups[group_idx] else None
+#             yerr_high = [ranges_groups[group_idx][i][domain][1] for domain in all_domains] if ranges_groups[group_idx] else None
 
-            if yerr_high != None and yerr_high != None:
-                yerr = [yerr_low, yerr_high]
-                plt.errorbar(positions, values, yerr=yerr, fmt='o', color='black', capsize=1, elinewidth=1, capthick=1, markersize=3)
+#             if yerr_high != None and yerr_high != None:
+#                 yerr = [yerr_low, yerr_high]
+#                 plt.errorbar(positions, values, yerr=yerr, fmt='o', color='black', capsize=1, elinewidth=1, capthick=1, markersize=3)
 
-            # Store the bar handles and corresponding labels for later
-            group_handles.append(bar)
-            group_labels.append(label)
+#             # Store the bar handles and corresponding labels for later
+#             group_handles.append(bar)
+#             group_labels.append(label)
 
-        # Append the group-specific handles and labels to the main list
-        legend_handles.append(group_handles)
-        legend_labels.append(group_labels)
+#         # Append the group-specific handles and labels to the main list
+#         legend_handles.append(group_handles)
+#         legend_labels.append(group_labels)
 
-        ax.set_yscale(scales[group_idx] if scales and group_idx < len(scales) else 'linear')
+#         ax.set_yscale(scales[group_idx] if scales and group_idx < len(scales) else 'linear')
         
-        bar_pos += len(dicts) * bar_width
+#         bar_pos += len(dicts) * bar_width
 
-    ax1.set_xticks(x)
-    ax1.set_xticklabels(all_domains, rotation=45, ha='right')
-    ax1.set_xlabel('Domain')
-    ax1.grid(True, axis='y')
-    fig.suptitle(title)
+#     ax1.set_xticks(x)
+#     ax1.set_xticklabels(all_domains, rotation=45, ha='right')
+#     ax1.set_xlabel('Domain')
+#     ax1.grid(True, axis='y')
+#     fig.suptitle(title)
     
-    # Combine all legends, making sure each group has its own legend
-    for i, (group_handles, group_labels) in enumerate(zip(legend_handles, legend_labels)):
-        ax_list[i].legend(group_handles, group_labels, loc='upper right' if i == 0 else 'upper left', bbox_to_anchor=(1, 1), frameon=False)
+#     # Combine all legends, making sure each group has its own legend
+#     for i, (group_handles, group_labels) in enumerate(zip(legend_handles, legend_labels)):
+#         ax_list[i].legend(group_handles, group_labels, loc='upper right' if i == 0 else 'upper left', bbox_to_anchor=(1, 1), frameon=False)
 
-    plt.tight_layout()
+#     plt.tight_layout()
 
-    if path:
-        plt.savefig(path, bbox_inches='tight')
-    plt.show()
+#     if path:
+#         plt.savefig(path, bbox_inches='tight')
+#     plt.show()
 
-def influence_curve_task(task_id, saveto=None, nodups=True):
+def influence_curve_task(task_id, saveto=None):
+    """
+    Function to plot the influence curve for a given task.
+    
+    :param task_id: id of the task to plot
+    :param saveto: file path to save the plot (optional, if None will show the plot instead)
+    """
     params = task_params_dict[task_id]
-    meds = get_answers(task_id, data='median')
     consensus_ans = sorted(params['cons_ans'])
     control_ans = sorted(params['ctrl_ans'])
     
@@ -373,20 +390,15 @@ def influence_curve_task(task_id, saveto=None, nodups=True):
         params['L'], params['U'],
         (params['conf_minus'], params['conf_plus']),
         eq=params['final_median'],
-        # a_range=(params["min_ans"]-200, params["max_ans"]+200),
         x_range=(control_ans[5], control_ans[-5]),
-        # a_range=(0,100),
         correct=params['correct'],
         correct_perc=params['correct_perc'],
         medians=get_answers(task_id, 'Consensus', 'median'),
         title=f"[{task_id}] {params['prompt']} {params['c']:.2f}",
-        # control_medians=(min(meds), max(meds)),
         control_medians=(consensus_ans[5], consensus_ans[-5]), 
         median=params['median'],
-        # points=[(params['cons_M_minus'], 0, "#D06425", 'Consensus M-'),
-        #         (params['cons_M_plus'], 0, '#123456', 'Consensus M+')]
     )
-    # print(f)
+
     if saveto:
         plt.savefig(saveto, dpi=300)
     else:
@@ -394,9 +406,9 @@ def influence_curve_task(task_id, saveto=None, nodups=True):
     plt.close()
 
 def influence_curve_domain(dom):
+    os.makedirs(f"./plots/{dom}", exist_ok=True)
     for task_id in df[df['domain_name'] == dom]['task_id'].unique():
         # print(f"Task ID: {task_id} - Domain: {get_domain_name(task_id)}")
-
         influence_curve_task(task_id, saveto=f"./plots/{dom}/sic_{task_id}.")
 
 
@@ -405,9 +417,8 @@ def plot_avg_score_with_ci(alpha=0.95, title=None):
     """
     Plot average relative scores with parametric alpha confidence intervals.
 
-    Args:
-        alpha (float): significance level (e.g. 0.05 for 95% CI)
-        title (str): plot title
+    :param alpha: confidence level for intervals (default: 0.95)
+    :param title: plot title (optional)
     """
     plt.figure(figsize=(5, 4))
     plt.title('Average Score by Condition (relative to Control)')
@@ -443,15 +454,10 @@ def plot_avg_score_with_ci(alpha=0.95, title=None):
 
         # --- Plot ---
 
-        # plt.bar(x, final_score, color=colors, width=0.1)
         plt.errorbar(x - offset if score_type=='scores' else x + offset, final_score, label='Median' if score_type=='scores' else 'Average',
                      yerr=[final_score - conf_low, conf_high - final_score],
                      fmt='o', color=next(colors), capsize=2, markerfacecolor='none', markersize=6)
 
-        # for i, score in enumerate(final_score):
-        #     plt.errorbar(i, score,
-        #                 yerr=[[score - conf_low[i]], [conf_high[i] - score]],
-        #                 fmt='o', color=colors[i], capsize=3, markerfacecolor='none', markersize=8)
         
     plt.axhline(0, color='gray', linestyle='--', linewidth=0.8)
 
@@ -479,6 +485,15 @@ def compute_stats_for_regression(
         condition=0,                # 0 for control, 1 for consensus, etc. (index into scores list)
         mae=True,                   # True -> MAE-like; False -> RMSE-like transform (square then sqrt for means)):
 ):
+    """
+    Compute X and Y values for regression analysis based on task parameters and specified functions.
+    
+    :param func_x: Function that takes a task_id and returns the x-value for regression (default: average copying probability for the task's domain)
+    :param func_y: Function that takes a task's parameter dict and returns the y-value for regression (default: score for the specified condition)
+    :param acc: Tuple specifying the accuracy range (min, max) for filtering tasks based on their starting accuracy in the specified condition (default: (0, 1) to include all tasks)
+    :param condition: Index of the condition to use for filtering tasks based on starting accuracy (default: 0 for control)
+    :param mae: Boolean indicating whether to use MAE-like (True) or RMSE-like (False) transform (default: True)
+    """
     X_all, Y_all = [], []
 
     X_means, Y_means = [], []
@@ -518,13 +533,13 @@ def compute_stats_for_regression(
         # domain means
         domain_mean = np.sum(y_list, axis=0) / n if mae else np.sqrt(np.sum(y_list, axis=0) / n)
         y_mean = domain_mean if isinstance(domain_mean, (int, float)) else domain_mean[1] - domain_mean[0]  # if multiple conditions, take difference for regression
-        X_means.append(func_x(task_ids[0]))  # all tasks in domain have same x, so just take first
+        X_means.append(np.mean([func_x(task_id) for task_id in task_ids]))  # mean x for the domain (e.g. mean copying probability)
         Y_means.append(y_mean)
         mean_domain_ids.append(dom_idx)
         mean_domain_names.append(domain)
         task_counts.append(n)
 
-        # old weighting: n / var(list)
+        # mean weights for weighted regression: n / var (or n / sum of variances if multiple conditions)
         if n <= 1:
             mean_weights.append(eps)
         else:
@@ -542,7 +557,7 @@ def compute_stats_for_regression(
         "mean_weights": mean_weights,
         }
 
-def plot_tasks_vs_mu_c(
+def all_tasks_regression(
     *,
     func_x=lambda task_id: c_per_domain[task_params_dict[task_id]['domain']],
     func_y=lambda d: d['scores'][0],
@@ -578,7 +593,7 @@ def plot_tasks_vs_mu_c(
     marker_mean="s",
 
     # regression
-    fit_on="all",               # "all" | "means"
+    fit_on="all",               # "all": use all tasks | "means": use domain means
     show_fit=True,
     fit_label=True,
     joint_labels=False,
@@ -588,23 +603,12 @@ def plot_tasks_vs_mu_c(
     equaldots=True,             # if False, mean marker sizes scale with task_count
     show_zero_line=False,          # horizontal line at y=0 for difference plot
 
-    plot_extra=False,           # plot extra series on domain means
-    extra_y_per_domain=None,    # dict: {domain: value} (same x = mu_c_per_domain[domain])
-    label_extra=None,
-    color_extra="#2D78C3",
-    marker_extra="x",
-
     return_data=False,          # return dict of arrays for downstream use
     grid_option='both',           # show axis grid
     alpha_grid=0.25,
 ):
     """
-    x = mu_c(domain)
-
-    y depends on `mode`:
-      - "ctrl": control score
-      - "cons": consensus score
-      - "diff": consensus - control
+    Function to plot tasks and domain means with regression fit, with flexible options
     """
 
     if ax is None:
@@ -670,7 +674,7 @@ def plot_tasks_vs_mu_c(
             label=label if not (show_tasks or joint_labels) else None
         )
 
-        # old labels_position: place ordered_domains[domain] at chosen y
+        # place domain labels near means (using domain index for ordering if available, otherwise domain name)
         if annotate_domain_means:
             for x, domain, ym in zip(results["X_means"], results["mean_domain_names"], results["Y_means"]):
                 y_text = ym
@@ -681,22 +685,6 @@ def plot_tasks_vs_mu_c(
     # baseline for diff
     if show_zero_line:
         ax.axhline(0, color="black", ls="--", lw=1)
-
-    # ---------- plot extra (domain means overlay) ----------
-    if plot_extra and (extra_y_per_domain is not None) and show_means and len(results["X_means"]) > 0:
-        extra_x, extra_y = [], []
-        for domain in results["mean_domain_names"]:
-            if domain in extra_y_per_domain:
-                extra_x.append(c_per_domain[domain])
-                extra_y.append(extra_y_per_domain[domain])
-
-        if len(extra_x) > 0:
-            ax.plot(
-                extra_x, extra_y,
-                marker_extra, color=color_extra,
-                label=(label_extra if label_extra is not None else "Extra"),
-                markersize=6, alpha=0.85
-            )
 
     # ---------- regression ----------
     if show_fit:
@@ -759,7 +747,7 @@ def plot_tasks_vs_mu_c(
     return ax
 
 
-def plot_ctrl_cons_diff_vs_mu_c(
+def all_tasks_regression_two_conditions(
         func_y=lambda d: d['scores'],  # should return list/array of scores
         color1 =palette['Control'], color2=palette['Consensus'], color_diff="#8828AE",
         label1="Control", label2="Social influence", label_diff="Difference",
@@ -776,7 +764,7 @@ def plot_ctrl_cons_diff_vs_mu_c(
         'ax': ax,
         **base
     }
-    ret1 = plot_tasks_vs_mu_c(**base1)
+    ret1 = all_tasks_regression(**base1)
 
     base2 = {
         'func_y': lambda d: func_y(d)[1],
@@ -786,7 +774,7 @@ def plot_ctrl_cons_diff_vs_mu_c(
         'ax': ax,
         **base
     }
-    ret2 = plot_tasks_vs_mu_c(**base2)
+    ret2 = all_tasks_regression(**base2)
 
     base_diff = {
         'func_y': func_y,
@@ -798,7 +786,7 @@ def plot_ctrl_cons_diff_vs_mu_c(
         'show_zero_line': True,
         **base
     }
-    ret3 = plot_tasks_vs_mu_c(**base_diff)
+    ret3 = all_tasks_regression(**base_diff)
 
     return {
         "control": ret1,
@@ -806,11 +794,16 @@ def plot_ctrl_cons_diff_vs_mu_c(
         "difference": ret3,
     }
 
-# lambda fitting functions
+# lambda fitting utilities
 def D_thresh(n1, n2):
+    """Kolmogorov-Smirnov D threshold for significance level alpha=0.05"""
     return 1.36 * np.sqrt((n1 + n2) / (n1 * n2))
 
 def compute_cleaned_consensus(task_id):
+    """
+    Function to compute the cleaned consensus and meds for a given task by removing answers that are copying the previous median.
+
+    """
     consensus = np.array(task_params_dict[task_id]['cons_ans'])
     consensus_meds = np.array(task_params_dict[task_id]['cons_meds'])
 
@@ -820,14 +813,31 @@ def compute_cleaned_consensus(task_id):
     return {'cleaned_consensus': cleaned, 'cleaned_meds': meds}
 
 def compute_ctrl_lambda(task_id, lamda):
+    """
+    Function to compute the control answers for a given task and lambda by removing copying answers from the consensus and adjusting the meds accordingly.
+    
+    :param task_id: id of the task to compute control answers for
+    :param lamda: lambda parameter for weighting the meds in the control calculation (0 <= lamda < 1)
+    """
     cleaned, meds = compute_cleaned_consensus(task_id).values()
     control_lambda = sorted((cleaned - lamda * meds) / (1 - lamda))
     return control_lambda
 
-def estimate_lambda(task_ids, method='ks', return_debug=1, plot=False, ax=None):
+methods = {
+        'wasserstein': {'func': lambda x: estimate_lambda(x, method='wasserstein'),
+                        'color': '#f78fa7'},
+        }
+
+def estimate_lambda(task_ids, method='wasserstein', return_debug=1, plot=False, ax=None):
     """
-    Returns:
-        best_lambda (float)
+Function to estimate the lambda parameter for a given set of task ids by comparing the control answers to the adjusted consensus answers 
+using a specified method (e.g. minimizing Wasserstein distance).
+    
+    :param task_ids: list of task ids to use for lambda estimation
+    :param method: method to use for comparing control and adjusted consensus answers (default: 'wasserstein')
+    :param return_debug: whether to return additional debug information (default: 1, returns dict with best_lambda and intermediate values; if 0, returns only best_lambda)
+    :param plot: whether to plot the lambda estimation results (default: False)
+    :param ax: matplotlib axis to use for plotting (default: None)
     """
     cleaned = np.zeros(len(task_ids), dtype=object)
     meds = np.zeros(len(task_ids), dtype=object)
@@ -836,16 +846,6 @@ def estimate_lambda(task_ids, method='ks', return_debug=1, plot=False, ax=None):
     for i, task_id in enumerate(task_ids):
         cleaned[i], meds[i] = compute_cleaned_consensus(task_id).values()
         control[i] = sorted(np.array(task_params_dict[task_id]['ctrl_ans']))
-
-    # make equal sizes
-    # if len(control) > len(cleaned):
-    #     control = np.random.choice(control, size=len(cleaned), replace=False)
-    # elif len(control) < len(cleaned):
-    #     idxs = np.random.choice(len(cleaned), size=len(control), replace=False)
-    #     cleaned = cleaned[idxs]
-    #     meds = meds[idxs]
-    
-    # assert len(cleaned) == len(meds), "Cleaned consensus and meds must be the same length"
 
     vals = []
     for lamda in np.linspace(0, 1, 100, endpoint=False):
@@ -862,29 +862,27 @@ def estimate_lambda(task_ids, method='ks', return_debug=1, plot=False, ax=None):
         if lamda == 0 or value < best_value:
             best_value = value
             best_lambda = lamda
-            # best_control_lamda = control_lamda
 
     if plot:
         if ax is None:
             f, ax = plt.subplots(figsize=(8,4))
         ax.plot(np.linspace(0, 1, 100, endpoint=False), vals, color = methods[method]['color'],
                 alpha=1, label=f'{method.upper()}, λ = {best_lambda:.2f}', lw=3)
-        # ax.axvline(best_lambda, color='r', linestyle='--', label=f'Best λ = {best_lambda:.2f}')
-        # ax.set_title(f'Lambda Estimation using {method.upper()} method')
-        # ax.set_xlabel('Lambda (λ)')
         ax.grid(True)
         ax.legend()
 
     if return_debug:
         return {'best_lambda': best_lambda,
-                # 'best_control_lamda': best_control_lamda,
-                # 'control': control,
                 'cleaned_consensus': cleaned,
                 'cleaned_meds': meds
                 }
     return best_lambda
 
 def build_lambda_fitting_dict(load=True):
+    """"
+    Function to build a dictionary of lambda fitting results for each domain and task, using the specified estimation method.
+    :param load: whether to load precomputed results from disk if available (default: True)
+    """
     if load:
         try:
             lambda_fitting_dict = load_from_file('data/lambda_fitting_per_domain_and_task.json')
@@ -916,13 +914,21 @@ def build_lambda_fitting_dict(load=True):
     save_to_json(lambda_fitting_dict, 'data/lambda_fitting_per_domain_and_task')
     return lambda_fitting_dict
 
-methods = {
-        'wasserstein': {'func': lambda x: estimate_lambda(x, method='wasserstein'),
-                        'color': '#f78fa7'},
-        }
 
 # simulations from dataset
 def sim_from_data(data, N=100, c=0.2, lambda_=0.2, init=[None]*3, fix=False):
+    """
+    Function to simulate a trajectory of answers for N users based on the given data and parameters, 
+    using the complex model where each user votes for either the previous median or a random sample from the data, with probabilities determined by c and lambda. 
+    The function keeps track of the median and votes at each step, and can optionally prevent users from voting for the same answer as the previous median (fix=True).
+    
+    :param data: list or array of initial answers to sample from for the simulation
+    :param N: Number of users to simulate
+    :param c: Probability of voting for the previous median
+    :param lambda_: Weight parameter for combining previous median and random sample
+    :param init: Initial votes for the first three users
+    :param fix: Whether to prevent users from voting for the same answer as the previous median
+    """
     meds = np.zeros(N)
     votes = np.zeros(N)
     heaps = MedianHeaps()
@@ -937,12 +943,20 @@ def sim_from_data(data, N=100, c=0.2, lambda_=0.2, init=[None]*3, fix=False):
             votes[t] = vote
         heaps.add_number(votes[t])
         meds[t] = heaps.get_median()
-        # meds[t] = statistic([v for v in votes[:t+1] if v is not None])
     
     return {'results': meds, 'votes': votes, 'last_update': last_update(meds)}
 
-# for given  task simulate model for N users and keep track of last update time
 def sims_for_last_update(task_id, lambda_fitting_dict, N=100, num_simulations=50, domain=True, lambda_zero=False):
+    """
+    Function to run multiple simulations for a given task and compute the distribution of the last update time (the last time the median changes) across simulations
+    
+    :param task_id: id of the task to simulate
+    :param lambda_fitting_dict: dictionary containing the fitted lambda values for each domain and task, used to set the lambda parameter for the simulations based on the task's domain
+    :param N: Number of users to simulate in each simulation
+    :param num_simulations: Number of simulations to run
+    :param domain: Whether to use domain-level parameters (True) or task-level parameters (False)
+    :param lambda_zero: Whether to set lambda to zero in the simulations
+    """
     params = task_params_dict[task_id]
     domain_name = params['domain']
     last_updates = np.zeros(N+1)
@@ -960,7 +974,17 @@ def sims_for_last_update(task_id, lambda_fitting_dict, N=100, num_simulations=50
     return {'last_updates': last_updates, 'avg_last_update': np.sum(np.arange(N+1) * last_updates) / num_simulations}
 
 # Task SIC with trajectory
-def plot_sic_with_traj(task, vertical=True,saveto=None, ax=None, title=None, offset=0, bounds=None):
+def plot_sic_with_traj(task, saveto=None, ax=None, title=None, offset=0, bounds=None):
+    """
+    Function to plot the SIC (Social Influence Curve) with trajectory for a given task.
+    
+    :param task: id of the task to plot
+    :param saveto: path to save the plot, if None the plot is not saved
+    :param ax: matplotlib axis to plot on, if None a new figure and axis are created
+    :param title: title of the plot, if None a default title is used
+    :param offset: offset for the bounds calculation
+    :param bounds: tuple specifying the bounds for the plot, if None they are calculated based on the control answers
+    """
     if ax is None:
         fig, ax = plt.subplots(figsize=(4, 4.5))
 
@@ -1018,8 +1042,12 @@ def plot_sic_with_traj(task, vertical=True,saveto=None, ax=None, title=None, off
         plt.savefig(saveto, dpi=300, bbox_inches="tight")
         # plt.close()
 
-# domain SIC with trajectory
 def get_short_prompt(task_id):
+    """
+    Function to extract a short prompt from the full prompt for a given task for the 'calories' domain
+    
+    :param task_id: id of the task
+    """
     prompt = get_prompt(task_id)
     # prompt = re.split(r'[" contain]"["does" ]', prompt)[1]
     # split by 'contain' or 'does'
@@ -1027,23 +1055,20 @@ def get_short_prompt(task_id):
     prompt = prompt.split('(')[0] + prompt.split(') ')[1] if ')' in prompt else prompt
     return prompt
 
+# domain SIC with trajectories
 def multi_task_plot_norm_horizontal(
     dom,
     N=20,
     cutoff=5,
     normalization="perc",
     plot=False,
-    log_medians=False,          # NEW: log-scale only for the task median trajectories
 ):
     """
-    Plot normalized predictions for multiple tasks in a domain (horizontal layout).
+    Plot (normalized) trajectories and predictions for multiple tasks in a domain (horizontal layout).
 
-    - Tasks are on the x-axis; normalized values (0–1) on the y-axis.
+    - Tasks are on the x-axis; (normalized) answer values on the y-axis.
     - Shows control/consensus median trajectories, final median, correct answer,
       and the theory-predicted interval per task.
-    - NEW: log_medians=True applies a log transform ONLY to the plotted median
-      trajectories (control and consensus sequences), leaving all other elements
-      (intervals, final median, correct answer, axes limits) unchanged.
 
     Parameters
     ----------
@@ -1055,15 +1080,8 @@ def multi_task_plot_norm_horizontal(
         Passed to normalization helper.
     normalization : {"perc","linear",...}
         Normalization mode.
-    conf : any
-        Passed to predict_task.
     plot : bool
         If True, show the plot; otherwise save to disk.
-    log_medians : bool
-        If True, plot control/consensus median sequences on a log scale
-        (log-transform of values), without changing the y-axis or other markers.
-    log_eps : float
-        Small constant added before log to avoid log(0).
     """
     task_ids = df[df["domain_name"] == dom]["task_id"].unique()
 
@@ -1082,25 +1100,9 @@ def multi_task_plot_norm_horizontal(
     )
 
     ticklabels = []
-    correct_ctrl = 0
-
-    def log_transform(vals):
-        if not log_medians:
-            return vals
-        N = len(vals)
-        scale = (max(vals) - min(vals)+1)**(1/(N-1))
-        vals_exp = [scale**i for i in range(N+1)]
-        diffs = np.cumsum([0] + [vals_exp[i+1] - vals_exp[i] for i in range(N-1)][::-1])
-        return [min(vals) + diff for diff in diffs]
     
-    def log_transform2(xmin, xmax, N):
-        if not log_medians:
-            return np.linspace(xmin, xmax, N)
-        scale = (N)**(1/(N-1))
-        vals_exp = [scale**i for i in range(N+1)]
-        diffs = np.cumsum([0] + [vals_exp[i+1] - vals_exp[i] for i in range(N-1)][::-1])
-        vals = [1 + diff for diff in diffs]
-        return [xmin + (xmax - xmin)*(v - min(vals))/(max(vals) - min(vals)) for v in vals]
+    def x_interval(xmin, xmax, N):
+        return np.linspace(xmin, xmax, N)
 
 
     for idx, task_id in enumerate(sorted(task_ids)):
@@ -1122,9 +1124,6 @@ def multi_task_plot_norm_horizontal(
         # Percentile-length interval implied by c
         k = params["c"] / (1 - params["c"] + 1e-6)
 
-        if min(ctrl_med) <= final_median <= max(ctrl_med):
-            correct_ctrl += 1
-
         x = idx
 
         # Plot theory interval (from predict_task) as a thick vertical segment
@@ -1132,8 +1131,7 @@ def multi_task_plot_norm_horizontal(
         ax.vlines(x, M_minus, M_plus, color="gray", linewidth=5, alpha=0.3)
 
         ax.plot(
-            # log_transform(xvals_ctrl),
-            log_transform2(x - 0.5, x, len(ctrl_med)),
+            x_interval(x - 0.5, x, len(ctrl_med)),
             ctrl_med,
             "-",
             color="black",
@@ -1143,7 +1141,7 @@ def multi_task_plot_norm_horizontal(
         )
 
         ax.plot(
-            log_transform2(x - 0.5, x, len(cons_med)),
+            x_interval(x - 0.5, x, len(cons_med)),
             cons_med,
             "-",
             color=palette["Consensus"],
@@ -1152,7 +1150,7 @@ def multi_task_plot_norm_horizontal(
             label="Social influence" if idx == 0 else "",
         )
 
-        # Correct answer marker (not log-transformed)
+        # Correct answer marker
         ax.plot(
             x,
             normalize(params["correct"]),
@@ -1163,7 +1161,7 @@ def multi_task_plot_norm_horizontal(
             label="Correct" if idx == 0 else "",
         )
 
-        # Final median marker (not log-transformed): hollow if outside domain band
+        # Final median marker: hollow if outside domain band
         is_correct = dom_lower <= final_median <= dom_upper
         ax.plot(
             x,
@@ -1175,7 +1173,7 @@ def multi_task_plot_norm_horizontal(
             markersize=7,
         )
 
-        # Annotate c near the top of the interval
+        # Annotate task c near the top of the interval
         ax.text(
             x,
             min(M_plus, 0.9) + 0.02,

@@ -125,6 +125,13 @@ def minN(x, N):
     return min(x, N-1)
 
 def normalize_func(normalization, ans, cutoff=1):
+    """
+    Returns a normalization function based on the specified method.
+    
+    :param normalization: Normalization method, either 'perc', 'linear', 'linear2', or 'perc1_1'.
+    :param ans: Array of answers to be used for normalization. If a list is provided, it will be converted to a numpy array.
+    :param cutoff: Cutoff value for linear normalization methods.
+    """
     # if ans is not np array, convert it
     if isinstance(ans, list):
         ans_h = np.array(ans)
@@ -132,7 +139,7 @@ def normalize_func(normalization, ans, cutoff=1):
         ans_h = ans
         
     if normalization == "perc":
-        # print("Using percentile normalization")
+        # simple percentile normalization: return the fraction of answers less than x
         def foo(x, side='right'):
             if isinstance(x, list):
                 x_new = np.array(x)
@@ -144,21 +151,22 @@ def normalize_func(normalization, ans, cutoff=1):
         return foo
     
     elif normalization == "linear":
-        # print("Using cutoff normalization")
+        # normalize linearly between cutoff and -cutoff percentiles, with values outside this range clamped to 0 or 1
         denom = ans_h[-cutoff-1] - ans_h[cutoff]
         return lambda x, side=None: ((np.array(x) if isinstance(x, list) else x) - ans[cutoff]) / denom if denom != 0 else \
                                     ((np.array(x) if isinstance(x, list) else x) - ans[0]) / (max(ans) - ans[0])
     
     elif normalization == "linear2":
-        # print("Using cutoff normalization")
+        # normalize linearly between cutoff and -cutoff percentiles, with values outside this range clamped to 0 or 1
         denom = ans_h[-cutoff-1] - ans_h[cutoff]
         return lambda x, side=None: (ans_h[cutoff]  + (np.array(x) if isinstance(x, list) else x) - ans[cutoff]) / denom if denom != 0 else \
                                     (ans_h[0] + (np.array(x) if isinstance(x, list) else x) - ans[0]) / (max(ans) - ans[0])
     
     elif normalization == 'perc1_1':
-        # print("Using percentile 1-1 normalization")
+        # percentile normalization that maps the median to 0.5, with linear interpolation between percentiles and clamping outside the range
+        # Values lower than the median are normalized using 'right' side, and values higher than the median are normalized using 'left' side
         def foo(x, side='right'):
-            if isinstance(x, list) or x is np.ndarray:
+            if isinstance(x, list) or isinstance(x, np.ndarray):
                 result = np.zeros(len(x))
                 for i, val in enumerate(x):
                     if val == np.median(ans_h):
@@ -184,7 +192,7 @@ def normalize_func(normalization, ans, cutoff=1):
                 return min(1, (idx + frac) / len(ans_h))
         return foo
     else:
-        raise ValueError(f"normalization must be 'perc' or 'linear' or 'perc1_1', not {normalization}")
+        raise ValueError(f"normalization must be 'perc' or 'linear' or 'linear2' or 'perc1_1', not {normalization}")
 
 
 def fit_percentiles(p, sorted_array, N=None):
@@ -204,6 +212,13 @@ def fit_percentiles(p, sorted_array, N=None):
     return intermediate
 
 def percentile_score(point, correct, data):
+    """
+    Computes the percentile score of a point given a set of answers and a correct answer.
+    
+    :param point: The point for which to compute the percentile score.
+    :param correct: The correct answer.
+    :param data: The set of answers or the task id for the data source.
+    """
     if isinstance(data, int):
         answers = get_answers(data)
     else:
@@ -215,6 +230,14 @@ def percentile_score(point, correct, data):
     return normalizer_dist(-abs(point - correct))
 
 def find_ms(answers, k, confidence=0.95):
+    
+    """
+    Finds the median and confidence intervals for a given set of answers.
+
+    :param answers: The set of answers.
+    :param k: The percentile range around the median.
+    :param confidence: The confidence level for the interval.
+    """
     N = len(answers)
     if N == 0:
         raise ValueError("Empty answers provided")
@@ -228,7 +251,6 @@ def find_ms(answers, k, confidence=0.95):
     m_plus = fit_percentiles(0.5 + k/2, answers_sorted, N)
 
     # Calculate the confidence interval
-    # eps = np.sqrt(np.log(2/confidence) / (2 * N))
     eps = np.sqrt(np.log(2/(1-confidence)) / (2 * N))
     conf_minus = (m_minus - fit_percentiles(max0(0.5 - k/2 - eps), answers_sorted, N),
                     fit_percentiles(max0(0.5 - k/2 + eps), answers_sorted, N) - m_minus)
@@ -237,6 +259,7 @@ def find_ms(answers, k, confidence=0.95):
     
     return m_minus, m_plus, conf_minus, conf_plus
 
+
 def influence_curve_new(M_minus, M_plus, confidence=(0,0), a=0, 
                         colors=["#0D7AE7", "#5DA7FB"],
                         x_range=(0, 1), n_points=100, eq=None, 
@@ -244,6 +267,27 @@ def influence_curve_new(M_minus, M_plus, confidence=(0,0), a=0,
                         medians=None, control_medians=None, 
                         median=None, points=None, 
                         ax=None, title="Influence Curve", plot=1):
+    """
+    Plots the influence curve based on the given parameters.
+    
+    :param M_minus: The lower bound of the influence curve.
+    :param M_plus: The upper bound of the influence curve.
+    :param confidence: The confidence intervals for the influence curve.
+    :param a: The weighting factor for the influence curve.
+    :param colors: The colors for the influence curve and points.
+    :param x_range: The range of x values for the influence curve.
+    :param n_points: The number of points to plot in the influence curve.
+    :param eq:  The final median to be plotted on the influence curve.
+    :param correct: The correct answer to be highlighted on the influence curve.
+    :param correct_perc: The percentile of the correct answer.
+    :param medians: The medians to be plotted on the influence curve.
+    :param control_medians: The control medians to be plotted on the influence curve.
+    :param median: The median to be plotted on the influence curve.
+    :param points: The points to be plotted on the influence curve.
+    :param ax: The matplotlib axes to plot on.
+    :param title: The title of the plot.
+    :param plot: Whether to display the plot.
+    """
     
     x_vals = np.linspace(*x_range, n_points)
     def infl_curve(M_m, M_p):
@@ -272,9 +316,6 @@ def influence_curve_new(M_minus, M_plus, confidence=(0,0), a=0,
                 color=colors[0], alpha=0.8)
 
         ax.plot(x_vals, x_vals, '--', color='black', alpha=0.5)
-
-        # ax.axvline(M_plus, ymax=M_plus, color=colors[1], linestyle='--', marker='^',label=fr'$M^+ = {M_plus:.2f}$')
-        # ax.axvline(M_minus, ymax=M_minus, color=colors[1], linestyle='--', marker='v',label=fr'$M^- = {M_minus:.2f}$')
 
         ax.plot(M_plus, M_plus, 'v', color=colors[1], markersize=6, label=fr'U = {M_plus:.2f}')   
         ax.plot(M_minus, M_minus, '^', color=colors[1], markersize=6, label=fr'L = {M_minus:.2f}')    
@@ -310,6 +351,12 @@ def influence_curve_new(M_minus, M_plus, confidence=(0,0), a=0,
 
 
 def non_fliers(vals, whis=1.5):
+    """
+    Returns the non-fliers and fliers from a set of values based on the interquartile range (IQR) method.
+    
+    :param vals: The input values.
+    :param whis: The whisker length, default is 1.5.
+    """
     vals = np.asarray(vals)
     q1, q3 = np.percentile(vals, [25, 75])
     iqr = q3 - q1
